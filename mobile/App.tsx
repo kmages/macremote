@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, AppState, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useKeepAwake } from 'expo-keep-awake';
@@ -12,6 +12,9 @@ import { checkPro, onProChange, purchasesConfigured, setupPurchases } from './sr
 
 const STORE_KEY = 'macremote.serverUrl';
 const LOAD_TIMEOUT_MS = 20000;
+// Right after the app opens, Tailscale on the phone may still be reconnecting. Retry quietly first.
+const AUTO_RETRIES = 3;
+const AUTO_RETRY_DELAY_MS = 2000;
 
 export default function App() {
   const [server, setServer] = useState<string | null | undefined>(undefined); // undefined = still loading
@@ -81,20 +84,48 @@ function Remote({ server, onChangeServer }: { server: string; onChangeServer: ()
   const [failure, setFailure] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const autoRetries = useRef(0);
+
+  const reload = useCallback(() => {
+    setFailure(null);
+    setLoaded(false);
+    setAttempt((n) => n + 1);
+  }, []);
+
+  // Network errors in the first seconds are usually Tailscale still waking up, not a real outage.
+  const fail = useCallback((message: string) => {
+    if (autoRetries.current < AUTO_RETRIES) {
+      autoRetries.current += 1;
+      setTimeout(reload, AUTO_RETRY_DELAY_MS);
+    } else {
+      setFailure(message);
+    }
+  }, [reload]);
+
+  // Coming back to the app after a failure: try again instead of waiting for a tap.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active' && failure) {
+        autoRetries.current = 0;
+        reload();
+      }
+    });
+    return () => sub.remove();
+  }, [failure, reload]);
 
   // A connection that hangs never raises an error, so give up after a while and say so.
   useEffect(() => {
     if (loaded || failure) return;
-    const t = setTimeout(() => setFailure('No response after 20 seconds.'), LOAD_TIMEOUT_MS);
+    const t = setTimeout(() => fail('No response after 20 seconds.'), LOAD_TIMEOUT_MS);
     return () => clearTimeout(t);
-  }, [loaded, failure, attempt]);
+  }, [loaded, failure, attempt, fail]);
 
   if (failure) {
     return (
       <View style={styles.card}>
         <Text style={styles.title}>Can&apos;t reach your Mac</Text>
         <Text style={styles.label}>{server}{'\n'}{failure}{'\n\n'}Check that Tailscale is connected on this phone, that macremote is running on the Mac, and that this address opens in Safari.</Text>
-        <Pressable style={styles.primary} onPress={() => { setFailure(null); setLoaded(false); setAttempt((n) => n + 1); }}>
+        <Pressable style={styles.primary} onPress={() => { autoRetries.current = 0; reload(); }}>
           <Text style={styles.primaryText}>Try again</Text>
         </Pressable>
         <Pressable style={styles.secondary} onPress={onChangeServer}><Text style={styles.secondaryText}>Change address</Text></Pressable>
@@ -109,8 +140,13 @@ function Remote({ server, onChangeServer }: { server: string; onChangeServer: ()
       originWhitelist={['https://*']}
       onShouldStartLoadWithRequest={(req) => isSameOrigin(req.url, server)}
       onLoadEnd={() => setLoaded(true)}
-      onError={(e) => setFailure(e.nativeEvent.description || 'The page failed to load.')}
-      onHttpError={(e) => { if (e.nativeEvent.statusCode >= 500) setFailure(`The server answered with error ${e.nativeEvent.statusCode}.`); }}
+      onLoad={() => { autoRetries.current = 0; }}
+      onError={(e) => fail(e.nativeEvent.description || 'The page failed to load.')}
+      onHttpError={(e) => { if (e.nativeEvent.statusCode >= 500) fail(`The server answered with error ${e.nativeEvent.statusCode}.`); }}
+      // iOS and Android can kill the web view's process while the app is in the background, which
+      // leaves a blank screen. Load it again instead.
+      onContentProcessDidTerminate={reload}
+      onRenderProcessGone={reload}
       sharedCookiesEnabled
       keyboardDisplayRequiresUserAction={false}
       bounces={false}
