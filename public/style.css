@@ -27,4 +27,6 @@ button.primary { width: 100%; margin-top: 16px; background: var(--accent); color
 #status { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); padding: 6px 14px; border-radius: 999px; background: rgba(15,23,42,.9); border: 1px solid var(--line); font-size: 14px; pointer-events: none; }
 #connect { position: absolute; inset: 0; overflow: auto; background: var(--bg); }
 #kbd { position: fixed; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; font-size: 16px; border: 0; padding: 0; }
+#meter { position: absolute; left: 8px; top: calc(env(safe-area-inset-top, 0px) + 8px); padding: 3px 8px; border-radius: 6px; background: rgba(15,23,42,.75); color: #94a3b8; font: 11px/1.4 ui-monospace, Menlo, monospace; pointer-events: none; }
+#meter:empty { display: none; }
 [hidden] { display: none !important; }

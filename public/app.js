@@ -1,4 +1,5 @@
 import RFB from '/vendor/novnc/core/rfb.js';
+import { encodingName } from '/vendor/novnc/core/encodings.js';
 
 const $ = (id) => document.getElementById(id);
 const STORE = 'macremote.credentials';
@@ -52,6 +53,7 @@ function connect() {
   rfb.resizeSession = false;
   rfb.showDotCursor = true;
   watchTraffic(rfb);
+  applyQuality(rfb);
 
   // teardown() disconnects the old instance asynchronously; its late events must not act on the new one.
   const me = rfb;
@@ -120,8 +122,59 @@ let lastRx = 0;
 function watchTraffic(instance) {
   lastRx = Date.now();
   // noVNC keeps the raw WebSocket on a private field; listening alongside its own handler is safe.
-  instance._sock?._websocket?.addEventListener('message', () => { if (rfb === instance) lastRx = Date.now(); });
+  instance._sock?._websocket?.addEventListener('message', (e) => {
+    if (rfb !== instance) return;
+    lastRx = Date.now();
+    meterBytes += e.data?.byteLength ?? 0;
+  });
+  // Count the rectangles the Mac sends by encoding, to see what the quality setting changes.
+  const handleRect = instance._handleRect?.bind(instance);
+  if (handleRect) {
+    instance._handleRect = function () {
+      const enc = this._FBU?.encoding;
+      const done = handleRect(); // false while the rectangle's data is still arriving
+      if (done && rfb === instance && enc != null && enc >= 0) {
+        const name = encodingName(enc);
+        meterEncodings.set(name, (meterEncodings.get(name) ?? 0) + 1);
+      }
+      return done;
+    };
+  }
 }
+
+// --- picture quality and the data meter ----------------------------------------
+// Fast asks the Mac for lossy, harder-compressed updates; Sharp for near-lossless. The Mac's Screen
+// Sharing server honours these only for encodings it supports, which is what the meter shows.
+const FAST_KEY = 'macremote.fast';
+let fastMode = false;
+try { fastMode = localStorage.getItem(FAST_KEY) === '1'; } catch { /* private mode */ }
+let meterBytes = 0;
+let meterEncodings = new Map();
+
+function applyQuality(instance) {
+  if (!instance) return;
+  instance.qualityLevel = fastMode ? 2 : 8;
+  instance.compressionLevel = fastMode ? 7 : 2;
+}
+function setFast(on) {
+  fastMode = on;
+  try { localStorage.setItem(FAST_KEY, on ? '1' : '0'); } catch { /* ignore */ }
+  $('btn-fast').textContent = on ? 'Fast' : 'Sharp';
+  $('btn-fast').classList.toggle('on', on);
+  $('meter').textContent = $('meter').textContent.replace(/(fast|sharp)$/, on ? 'fast' : 'sharp');
+  applyQuality(rfb);
+}
+
+setInterval(() => {
+  const el = $('meter');
+  if (!connected || document.hidden) { el.textContent = ''; return; }
+  const kbps = meterBytes / 1024;
+  const rate = kbps >= 1024 ? `${(kbps / 1024).toFixed(1)} MB/s` : `${Math.round(kbps)} KB/s`;
+  const encs = [...meterEncodings.entries()].sort((a, b) => b[1] - a[1]).map(([n]) => n).join(' ') || 'idle';
+  el.textContent = `${rate} · ${encs} · ${fastMode ? 'fast' : 'sharp'}`;
+  meterBytes = 0;
+  meterEncodings = new Map();
+}, 1000);
 
 setInterval(() => {
   if (!rfb || !connected || closed || document.hidden) return;
@@ -343,6 +396,8 @@ screenEl.addEventListener('touchend', endTouch, { capture: true, passive: false 
 screenEl.addEventListener('touchcancel', (e) => { endPad(); endTouch(e); }, { capture: true, passive: false });
 $('btn-zoom').addEventListener('click', () => { const r = screenEl.getBoundingClientRect(); applyZoom(1, r.left, r.top); });
 $('btn-pad').addEventListener('click', () => setPad(!padMode));
+$('btn-fast').addEventListener('click', () => setFast(!fastMode));
+setFast(fastMode);
 $('btn-pad').classList.toggle('on', padMode);
 screenEl.addEventListener('scroll', drawPtr);
 window.addEventListener('resize', drawPtr);

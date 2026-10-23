@@ -5,6 +5,7 @@ export function startFakeRfb(port = 0) {
   const sockets = new Set();
   const frozen = new Set(); // open but silent, like a network path that died without closing
   let connections = 0;
+  let lastEncodings = []; // most recent SetEncodings list from any client
   const server = net.createServer((sock) => {
     sockets.add(sock);
     connections += 1;
@@ -46,7 +47,11 @@ export function startFakeRfb(port = 0) {
             sock.write(out);
             i += 10;
           } else if (buf[i] === 0) i += 20;       // SetPixelFormat
-          else if (buf[i] === 2) i += 4 + 4 * buf.readUInt16BE(i + 2); // SetEncodings
+          else if (buf[i] === 2) { // SetEncodings
+            const n = buf.readUInt16BE(i + 2);
+            lastEncodings = Array.from({ length: n }, (_, k) => buf.readInt32BE(i + 4 + 4 * k));
+            i += 4 + 4 * n;
+          }
           else if (buf[i] === 4) i += 8;          // KeyEvent
           else if (buf[i] === 5) i += 6;          // PointerEvent
           else break;
@@ -57,6 +62,7 @@ export function startFakeRfb(port = 0) {
   return new Promise((resolve) => server.listen(port, '127.0.0.1', () => resolve({
     port: server.address().port,
     get connections() { return connections; },
+    get lastEncodings() { return lastEncodings; },
     dropAll: () => sockets.forEach((s) => s.destroy()),
     freezeAll: () => sockets.forEach((s) => frozen.add(s)),
     close: () => new Promise((r) => { sockets.forEach((s) => s.destroy()); server.close(r); }),

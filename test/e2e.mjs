@@ -61,6 +61,22 @@ try {
   await waitRed();
   console.log('ok  reconnects by itself when the connection freezes without closing');
 
+  // 3c. the meter shows live data, and Fast/Sharp changes what is asked of the Mac
+  // RFB pseudo-encodings: JPEG quality q is -32+q, compression level c is -256+c.
+  await page.waitForFunction(() => /(KB|MB)\/s · Raw/.test(document.querySelector('#meter')?.textContent ?? ''), null, { timeout: 5000 });
+  assert.ok(fake.lastEncodings.includes(-32 + 8) && fake.lastEncodings.includes(-256 + 2), 'Sharp asks for quality 8, compression 2');
+  await page.click('#btn-fast');
+  await until(() => fake.lastEncodings.includes(-32 + 2) && fake.lastEncodings.includes(-256 + 7), 5000);
+  assert.equal(await page.textContent('#btn-fast'), 'Fast');
+  const beforeFast = fake.connections;
+  fake.dropAll();
+  await until(() => fake.connections > beforeFast);
+  await waitRed();
+  await until(() => fake.lastEncodings.includes(-32 + 2), 5000); // the choice survives a reconnect
+  await page.screenshot({ path: process.env.E2E_SHOT ?? '/tmp/macremote-e2e.png' });
+  await page.click('#btn-fast'); // back to Sharp for the rest of the run
+  console.log('ok  meter shows live data; Fast/Sharp changes and keeps the quality asked of the Mac');
+
   // 4. app was away > 3s (iOS suspends it) -> fresh connection on return
   const before2 = fake.connections;
   await page.evaluate(() => {
