@@ -3,6 +3,7 @@ import net from 'node:net';
 
 export function startFakeRfb(port = 0) {
   const sockets = new Set();
+  const frozen = new Set(); // open but silent, like a network path that died without closing
   let connections = 0;
   const server = net.createServer((sock) => {
     sockets.add(sock);
@@ -12,6 +13,7 @@ export function startFakeRfb(port = 0) {
     sock.write('RFB 003.008\n');
     let stage = 0;
     sock.on('data', (buf) => {
+      if (frozen.has(sock)) return;
       if (stage === 0) { // client version -> offer security type 1 (None)
         stage = 1;
         sock.write(Buffer.from([1, 1]));
@@ -56,6 +58,7 @@ export function startFakeRfb(port = 0) {
     port: server.address().port,
     get connections() { return connections; },
     dropAll: () => sockets.forEach((s) => s.destroy()),
+    freezeAll: () => sockets.forEach((s) => frozen.add(s)),
     close: () => new Promise((r) => { sockets.forEach((s) => s.destroy()); server.close(r); }),
   })));
 }

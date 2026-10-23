@@ -10,6 +10,7 @@ import {
 } from './auth.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const HEARTBEAT_MS = 10_000; // ping interval for viewer sockets; two misses drop the session
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.webmanifest': 'application/manifest+json',
@@ -26,6 +27,7 @@ export function createApp({
   secureCookie = true,
   publicDir = join(root, 'public'),
   novncDir = join(root, 'node_modules', '@novnc', 'novnc'),
+  heartbeatMs = HEARTBEAT_MS,
 }) {
   if (!password) throw new Error('MACREMOTE_PASSWORD is required');
   const limiter = makeLimiter();
@@ -107,7 +109,16 @@ export function createApp({
       vnc.on('close', () => { clearInterval(poll); ws.close(); });
       vnc.on('error', () => ws.close(1011, 'VNC server unreachable'));
       ws.on('message', (d) => vnc.write(d));
-      ws.on('close', () => { clearInterval(poll); vnc.destroy(); });
+      // A phone that vanished (network change, app killed) never sends a close. Ping it and drop
+      // the session after two missed pongs, so a dead viewer doesn't hold Screen Sharing open.
+      let alive = true;
+      ws.on('pong', () => { alive = true; });
+      const heartbeat = setInterval(() => {
+        if (!alive) { ws.terminate(); return; }
+        alive = false;
+        try { ws.ping(); } catch { /* closing */ }
+      }, heartbeatMs);
+      ws.on('close', () => { clearInterval(poll); clearInterval(heartbeat); vnc.destroy(); });
       ws.on('error', () => vnc.destroy());
     });
   });

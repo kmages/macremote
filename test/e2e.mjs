@@ -54,6 +54,13 @@ try {
   await waitRed();
   console.log('ok  reconnects automatically after a dropped connection');
 
+  // 3b. the connection goes silent without closing (network change) -> client notices and reconnects
+  const beforeFreeze = fake.connections;
+  fake.freezeAll();
+  await until(() => fake.connections > beforeFreeze, 15000);
+  await waitRed();
+  console.log('ok  reconnects by itself when the connection freezes without closing');
+
   // 4. app was away > 3s (iOS suspends it) -> fresh connection on return
   const before2 = fake.connections;
   await page.evaluate(() => {

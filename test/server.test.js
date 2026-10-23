@@ -83,6 +83,32 @@ test('websocket: signed-in same-origin client reaches the VNC server', async () 
   ws.close();
 });
 
+test('websocket: a viewer that stops answering pings is dropped; a live one stays', async () => {
+  const quick = createApp({ password: PASSWORD, secret: 's3cret', vncPort: fake.port, secureCookie: false, heartbeatMs: 50 });
+  await new Promise((r) => quick.listen(0, '127.0.0.1', r));
+  const qhost = `127.0.0.1:${quick.address().port}`;
+  try {
+    const res = await fetch(`http://${qhost}/login`, {
+      method: 'POST', redirect: 'manual',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ password: PASSWORD }),
+    });
+    const cookie = res.headers.get('set-cookie').split(';')[0];
+    const opts = { headers: { cookie, origin: `http://${qhost}` } };
+    const dead = new WebSocket(`ws://${qhost}/vnc`, ['binary'], { ...opts, autoPong: false });
+    const live = new WebSocket(`ws://${qhost}/vnc`, ['binary'], opts);
+    await Promise.all([once(dead, 'open'), once(live, 'open')]);
+    const [code] = await once(dead, 'close');
+    assert.equal(code, 1006); // terminated by the server, no close handshake
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(live.readyState, WebSocket.OPEN);
+    live.close();
+  } finally {
+    quick.closeAllConnections();
+    quick.close();
+  }
+});
+
 test('five wrong passwords lock the address out', async () => {
   for (let i = 0; i < 5; i++) await login('wrong');
   assert.equal((await login()).status, 429);

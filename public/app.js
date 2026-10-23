@@ -51,6 +51,7 @@ function connect() {
   rfb.scaleViewport = true;
   rfb.resizeSession = false;
   rfb.showDotCursor = true;
+  watchTraffic(rfb);
 
   // teardown() disconnects the old instance asynchronously; its late events must not act on the new one.
   const me = rfb;
@@ -107,6 +108,33 @@ function closeSession() {
   forgetCreds();
   fetch('/logout', { method: 'POST' }).finally(() => { location.href = '/login.html'; });
 }
+
+// --- noticing a dead connection --------------------------------------------
+// A socket can die without a close event (Wi-Fi to cellular, Tailscale changing paths, a short
+// suspend), leaving a frozen screen until the app is closed and reopened. VNC has no ping, so ask
+// the Mac for one pixel when the line has been quiet: it must answer, and no answer means dead.
+const PING_WHEN_QUIET_MS = 2500;
+const DEAD_AFTER_MS = 6000;
+let lastRx = 0;
+
+function watchTraffic(instance) {
+  lastRx = Date.now();
+  // noVNC keeps the raw WebSocket on a private field; listening alongside its own handler is safe.
+  instance._sock?._websocket?.addEventListener('message', () => { if (rfb === instance) lastRx = Date.now(); });
+}
+
+setInterval(() => {
+  if (!rfb || !connected || closed || document.hidden) return;
+  const quiet = Date.now() - lastRx;
+  if (quiet > DEAD_AFTER_MS) {
+    retries = 0;
+    connect();
+  } else if (quiet > PING_WHEN_QUIET_MS) {
+    try {
+      RFB.messages.fbUpdateRequest(rfb._sock, false, 0, 0, 1, 1);
+    } catch { /* socket closing; the disconnect handler takes over */ }
+  }
+}, 1000);
 
 // --- coming back to the app --------------------------------------------------
 function resume() {
