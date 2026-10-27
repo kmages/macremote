@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { PurchasesPackage } from 'react-native-purchases';
-import { buy, loadPackage, purchasesConfigured, restore, trialLabel } from './purchases';
+import { appUserId, buy, loadPackage, purchasesConfigured, restore, trialLabel } from './purchases';
 
 const SITE = 'https://phonetopcremote.com';
 export const PRIVACY_URL = `${SITE}/privacy/`;
@@ -74,6 +74,8 @@ export function Paywall({ onUnlocked, onDemo }: { onUnlocked: () => void; onDemo
         <Text style={styles.fine}>  ·  </Text>
         <Text style={styles.link} onPress={() => Linking.openURL(PRIVACY_URL)}>Privacy Policy</Text>
       </View>
+      {/* For support: the RevenueCat ID of this phone, so a free unlock can be granted to it (src/identity). */}
+      {appUserId() ? <Text selectable style={[styles.fine, { opacity: 0.5, marginTop: 8 }]}>App ID: {appUserId()}</Text> : null}
     </ScrollView>
   );
 }

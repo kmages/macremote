@@ -26,11 +26,14 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    setupPurchases();
     // Without store keys (local development) the app is unlocked so it can still be worked on.
     if (!purchasesConfigured) { setPro(__DEV__); return; }
-    checkPro().then(setPro, () => setPro(false));
-    return onProChange(setPro);
+    let off = () => {};
+    setupPurchases().then(() => {
+      checkPro().then(setPro, () => setPro(false));
+      off = onProChange(setPro);
+    });
+    return () => off();
   }, []);
 
   const save = useCallback(async (url: string) => {

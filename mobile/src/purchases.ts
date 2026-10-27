@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import Purchases, { type CustomerInfo, type PurchasesPackage } from 'react-native-purchases';
+import { stableUserId } from './identity';
 
 // The entitlement that unlocks the app. Create it in the RevenueCat dashboard and attach the yearly product.
 export const ENTITLEMENT = 'pro';
@@ -10,11 +11,27 @@ const KEY = Platform.select({
 });
 export const purchasesConfigured = !!KEY;
 
-let ready = false;
-export function setupPurchases(): void {
-  if (ready || !KEY) return;
-  Purchases.configure({ apiKey: KEY });
-  ready = true;
+let ready: Promise<void> | null = null;
+let userId: string | null = null;
+/** The RevenueCat app user ID this phone uses (shown on the paywall, for support and for granting a free unlock). */
+export const appUserId = () => userId;
+
+/**
+ * Configure RevenueCat, then log in with this phone's stable ID (src/identity). Logging in from the anonymous user
+ * moves any purchase already made on this install onto the stable ID, so an existing subscriber loses nothing.
+ * If the Keychain or the login fails, the app carries on as the anonymous user, as before.
+ */
+export function setupPurchases(): Promise<void> {
+  if (!KEY) return Promise.resolve();
+  if (!ready) ready = (async () => {
+    Purchases.configure({ apiKey: KEY });
+    try {
+      const id = await stableUserId();
+      await Purchases.logIn(id);
+      userId = id;
+    } catch { /* anonymous, as before */ }
+  })();
+  return ready;
 }
 
 export const hasPro = (info: CustomerInfo): boolean => !!info.entitlements.active[ENTITLEMENT];

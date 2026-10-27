@@ -32,6 +32,9 @@
         "projectId": "8ac6c9e5-00f1-4f06-b58a-81622eed296c"
       }
     },
-    "owner": "kmages"
+    "owner": "kmages",
+    "plugins": [
+      "expo-secure-store"
+    ]
   }
 }
